@@ -3,7 +3,7 @@ from app.video.video_reader import RawVideoSource
 
 class FrameScheduler:
     def __init__(self, video_source: RawVideoSource, target_fps: int = 15, simulate_processing_delay: float = 0.0, 
-                 ml_module = None, result_callback = None, raw_callback = None):
+                 ml_module = None, result_callback = None, raw_callback = None, shutdown_event = None):
         """
         Initializes the FrameScheduler.
 
@@ -14,6 +14,7 @@ class FrameScheduler:
             ml_module (object): Optional ML module with run_inference method.
             result_callback (callable): Optional callback for ML results. signature: (dict) -> None.
             raw_callback (callable): Optional callback for RAW frames. signature: (frame, frame_id, timestamp) -> None.
+            shutdown_event (threading.Event): Signal to stop the scheduler gracefully on shutdown.
         """
         self.video_source = video_source
         self.target_fps = target_fps
@@ -22,6 +23,7 @@ class FrameScheduler:
         self.ml_module = ml_module
         self.result_callback = result_callback
         self.raw_callback = raw_callback
+        self.shutdown_event = shutdown_event
 
     def run(self):
         """
@@ -47,6 +49,10 @@ class FrameScheduler:
         try:
             # New contract: frame, frame_id, timestamp
             for frame, frame_id, timestamp in self.video_source.read():
+                # Check if shutdown was signaled; exit early if so
+                if self.shutdown_event and self.shutdown_event.is_set():
+                    print("[Scheduler] Shutdown signal received, stopping gracefully.")
+                    break
                 
                 # Adjust start time reference if this is the first frame we see
                 if frame_id == 0:

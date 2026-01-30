@@ -1,11 +1,10 @@
 import RawFeedPanel from './components/RawFeedPanel';
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect } from 'react';
 import StatusBar from './components/StatusBar';
 import VideoPanel from './components/VideoPanel';
 import AlertPanel from './components/AlertPanel';
 import ConnectionOverlay from './components/ConnectionOverlay';
-import LoginPage from './components/LoginPage';
 import useLiveStream from './hooks/useLiveStream';
 import useFakeStream from './hooks/useFakeStream';
 import { SYSTEM_STATES, CONNECTION_STATES } from './constants';
@@ -31,10 +30,8 @@ const USE_FAKE_STREAM = false;
  * - Passes all required data to child components
  */
 function App() {
-  const [token, setToken] = useState(null);
-
   // Only use live stream when not in fake/test mode
-  const liveStreamData = useLiveStream(USE_FAKE_STREAM ? null : token);
+  const liveStreamData = useLiveStream(!USE_FAKE_STREAM);
 
   // Destructure with defaults for when hook returns null/disconnected state
   const {
@@ -58,10 +55,6 @@ function App() {
     image_data: null,
     system: { fps: null, latency_ms: null }
   };
-
-  if (!token) {
-    return <LoginPage onLogin={setToken} />;
-  }
 
   return (
     <div className="app-container">

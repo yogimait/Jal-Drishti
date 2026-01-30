@@ -6,7 +6,7 @@ import {
     WS_CONFIG
 } from '../constants';
 
-const useLiveStream = (token) => {
+const useLiveStream = (enabled = true) => {
     const [frame, setFrame] = useState(null);
     const [fps, setFps] = useState(0);
     const [connectionStatus, setConnectionStatus] = useState(CONNECTION_STATES.DISCONNECTED);
@@ -46,10 +46,10 @@ const useLiveStream = (token) => {
 
     // Connect to WebSocket function
     const connect = useCallback(() => {
-        if (!token) return;
+        if (!enabled) return;
 
         try {
-            const ws = new WebSocket(`${WS_CONFIG.URL}?token=${token}`);
+            const ws = new WebSocket(WS_CONFIG.URL);
             wsRef.current = ws;
 
             ws.onopen = () => {
@@ -146,7 +146,7 @@ const useLiveStream = (token) => {
             console.error('[WS] Failed to create WebSocket:', err);
             setConnectionStatus(CONNECTION_STATES.FAILED);
         }
-    }, [token, getReconnectDelay]);
+    }, [enabled, getReconnectDelay]);
 
     // Keep the ref updated for timeout callbacks
     useEffect(() => {

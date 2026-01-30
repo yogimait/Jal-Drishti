@@ -1,17 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { WS_CONFIG } from '../constants';
+import { WS_CONFIG, RECONNECT_CONFIG } from '../constants';
 
-const useRawFeed = (token) => {
+const useRawFeed = () => {
     const [status, setStatus] = useState('DISCONNECTED');
     const [resolution, setResolution] = useState(null);
-    const imageRef = useRef(null); // Ref to the image string or Blob URL
-
-    // We use a ref for the renderer to avoid re-renders on every frame
-    // But we might want to expose a 'latestFrame' state if the consuming component renders via <img> src
     const [frameSrc, setFrameSrc] = useState(null);
+    const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
     const wsRef = useRef(null);
     const lastFrameIdRef = useRef(-1);
+    const reconnectTimeoutRef = useRef(null);
+    const connectRef = useRef(null);
+
+    const getReconnectDelay = useCallback((attempt) => {
+        return Math.min(
+            RECONNECT_CONFIG.BASE_DELAY_MS * (2 ** attempt),
+            RECONNECT_CONFIG.MAX_DELAY_MS
+        );
+    }, []);
 
     const connect = useCallback(() => {
         // Construct WS URL - explicitly triggering the raw_feed endpoint
@@ -48,6 +54,7 @@ const useRawFeed = (token) => {
             ws.onopen = () => {
                 console.log('[RawFeed] Connected');
                 setStatus('CONNECTED');
+                setReconnectAttempt(0);
                 lastFrameIdRef.current = -1;
             };
 
@@ -82,6 +89,21 @@ const useRawFeed = (token) => {
                 console.log('[RawFeed] Disconnected');
                 setStatus('DISCONNECTED');
                 setFrameSrc(null);
+                
+                // Attempt reconnection
+                setReconnectAttempt((prev) => {
+                    const nextAttempt = prev + 1;
+                    const delay = getReconnectDelay(nextAttempt);
+                    console.log(`[RawFeed] Reconnecting in ${delay}ms (attempt ${nextAttempt})`);
+                    
+                    reconnectTimeoutRef.current = setTimeout(() => {
+                        if (connectRef.current) {
+                            connectRef.current();
+                        }
+                    }, delay);
+                    
+                    return nextAttempt;
+                });
             };
 
             ws.onerror = (err) => {
@@ -93,13 +115,20 @@ const useRawFeed = (token) => {
             console.error("[RawFeed] URL Construction Error", e);
             setStatus('ERROR');
         }
-    }, []);
+    }, [getReconnectDelay]);
+
+    useEffect(() => {
+        connectRef.current = connect;
+    }, [connect]);
 
     useEffect(() => {
         connect();
         return () => {
             if (wsRef.current) {
                 wsRef.current.close();
+            }
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current);
             }
         };
     }, [connect]);

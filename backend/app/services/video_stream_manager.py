@@ -12,6 +12,7 @@ class VideoStreamManager:
     """
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.is_shutting_down = False
         
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -32,7 +33,7 @@ class VideoStreamManager:
             frame_id: Integer frame counter
             timestamp: Time of capture
         """
-        if not self.active_connections:
+        if not self.active_connections or self.is_shutting_down:
             return
 
         try:
