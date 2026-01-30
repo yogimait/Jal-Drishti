@@ -71,29 +71,43 @@ class RawVideoSource:
             return
 
         frame_id = 0
-        
+
         print(f"[RawVideoSource] Streaming from: {self.video_path}")
 
         try:
             while True:
                 ret, frame = cap.read()
-                
+
                 if not ret:
                     print("[VideoReader] Info: End of video reached or cannot read frame.")
                     break
-                
+
                 # Validation Logic
                 # Ensure dtype is uint8
+                if frame is None:
+                    print("[VideoReader] Warning: Received None frame, skipping")
+                    continue
+
                 if frame.dtype != 'uint8':
-                     frame = frame.astype('uint8')
+                    frame = frame.astype('uint8')
+
+                timestamp = time.time()
+
+                # Convert BGR (OpenCV default) to RGB for downstream consumers
+                try:
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                except Exception:
+                    # If conversion fails for any reason, fall back to original frame
+                    rgb_frame = frame
 
                 # Log basic frame info
-                # "Outputs basic validation logs for each frame"
-                print(f"[VideoReader] Frame {frame_index}: Shape={frame.shape}, Dtype={frame.dtype}")
-                
-                yield frame
-                
-                frame_index += 1
+                # Outputs basic validation logs for each frame
+                print(f"[VideoReader] Frame {frame_id}: Shape={frame.shape}, Dtype={frame.dtype}, TS={timestamp}")
+
+                # Yield a tuple (frame, frame_id, timestamp) to callers that expect it
+                yield rgb_frame, frame_id, timestamp
+
+                frame_id += 1
                 
         except Exception as e:
             print(f"[RawVideoSource] Error processing video: {e}")

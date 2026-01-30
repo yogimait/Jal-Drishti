@@ -62,7 +62,7 @@ async def startup_event():
             print(f"[Startup] Warning: {video_path} not found.")
             return
     
-    reader = VideoReader(video_path)
+    reader = RawVideoSource(video_path)
 
     # Callback to push to WebSocket
     def on_result(envelope):
@@ -80,7 +80,18 @@ async def startup_event():
             ws_server.broadcast(envelope)
 
     # Scheduler
-    scheduler = FrameScheduler(reader, target_fps=5, ml_module=ml_service, result_callback=on_result)
+    # Raw frame callback: schedule the coroutine on the main loop
+    def raw_frame_callback(frame, frame_id, timestamp):
+        try:
+            # Use run_coroutine_threadsafe to schedule async broadcast from scheduler thread
+            asyncio.run_coroutine_threadsafe(
+                video_stream_manager.broadcast_raw_frame(frame, frame_id, timestamp),
+                loop
+            )
+        except Exception as e:
+            print(f"[Startup] Error scheduling raw frame broadcast: {e}")
+
+    scheduler = FrameScheduler(reader, target_fps=5, ml_module=ml_service, result_callback=on_result, raw_callback=raw_frame_callback)
     
     # Run in background thread
     t = threading.Thread(target=scheduler.run, daemon=True)
