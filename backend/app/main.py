@@ -1,10 +1,12 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stream, ws_server
+from fastapi.staticfiles import StaticFiles
+from app.api import stream, ws_server, phone_upload
 from app.auth import auth_router
 
 # Core Modules
 from app.video.video_reader import RawVideoSource
+from app.video.phone_source import PhoneCameraSource, phone_camera_source
 from app.scheduler.frame_scheduler import FrameScheduler
 from app.ml.dummy_ml import DummyML
 from app.services.video_stream_manager import video_stream_manager
@@ -14,6 +16,17 @@ import asyncio
 import os
 
 app = FastAPI(title="Jal-Drishti Backend", version="1.0.0")
+
+# Mount static files directory for phone_camera.html
+# Access at: http://<host>:<port>/static/phone_camera.html
+# __file__ is backend/app/main.py, so we go up twice to get backend/
+_app_dir = os.path.dirname(os.path.abspath(__file__))  # backend/app
+_backend_dir = os.path.dirname(_app_dir)               # backend
+static_dir = os.path.join(_backend_dir, "static")
+print(f"[Main] Static directory: {static_dir}, exists: {os.path.exists(static_dir)}")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    print("[Main] Static files mounted at /static")
 
 
 app.add_middleware(
@@ -28,6 +41,7 @@ app.add_middleware(
 app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 # app.include_router(stream.router, prefix="/ws", tags=["stream"]) # Keeping old one for now if needed?
 app.include_router(ws_server.router, prefix="/ws", tags=["websocket"])
+app.include_router(phone_upload.router, prefix="/ws", tags=["phone"])
 
 # --- RAW FEED WEBSOCKET ---
 @app.websocket("/ws/raw_feed")
@@ -53,16 +67,33 @@ async def startup_event():
     # Initialize Core Pipeline
     from app.services.ml_service import ml_service
     
-    video_path = "backend/dummy.mp4"
-    if not os.path.exists(video_path):
-        # Check relative to root as well
-        if os.path.exists("dummy.mp4"):
-            video_path = "dummy.mp4"
-        else:
-            print(f"[Startup] Warning: {video_path} not found.")
-            return
+    # =====================================================
+    # SOURCE SELECTION LOGIC
+    # =====================================================
+    # INPUT_SOURCE env var controls which video source to use:
+    # - "video" (default): Use dummy.mp4 file (existing behavior)
+    # - "phone": Use phone camera via WebSocket upload
+    # =====================================================
+    input_source = os.getenv("INPUT_SOURCE", "video").lower()
     
-    reader = RawVideoSource(video_path)
+    if input_source == "phone":
+        # Use phone camera source
+        # Frames are injected via /ws/upload endpoint from phone_camera.html
+        reader = phone_camera_source
+        print("[Startup] Using PHONE CAMERA source. Connect phone to /ws/upload")
+    else:
+        # Default: Use video file source (existing behavior)
+        video_path = "backend/dummy.mp4"
+        if not os.path.exists(video_path):
+            # Check relative to root as well
+            if os.path.exists("dummy.mp4"):
+                video_path = "dummy.mp4"
+            else:
+                print(f"[Startup] Warning: {video_path} not found.")
+                return
+        
+        reader = RawVideoSource(video_path)
+        print(f"[Startup] Using VIDEO FILE source: {video_path}")
 
     # Callback to push to WebSocket
     def on_result(envelope):
