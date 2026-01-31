@@ -74,10 +74,18 @@ class VideoStreamManager:
             for connection in self.active_connections[:]:
                 try:
                     await connection.send_json(payload)
-                except WebSocketDisconnect:
-                    self.disconnect(connection)
                 except Exception as e:
-                    print(f"[VideoStreamManager] Error sending: {e}")
+                    # WebSocketDisconnect is a subclass of Exception; handle it specifically
+                    error_msg = str(e).lower() if e else ""
+                    
+                    # Normal disconnects (client-side close) - silent unless verbose
+                    if isinstance(e, WebSocketDisconnect) or "connection closed" in error_msg or "receive failed" in error_msg:
+                        pass  # Normal client disconnect, just remove quietly
+                    # Abnormal send failures - log if not shutting down
+                    elif not self.is_shutting_down:
+                        print(f"[VideoStreamManager] Send error: {type(e).__name__}: {e}")
+                    
+                    # Remove from active connections
                     self.disconnect(connection)
                     
         except Exception as e:

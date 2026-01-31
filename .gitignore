@@ -11,6 +11,7 @@ ml-engine/venv
 backend/venv
 ml-engine/detection/yolo/weights/yolov8n.pt
 frontend/docs_helping
+pvt-docs
 *.pyc
 # Logs
 logs

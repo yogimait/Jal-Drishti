@@ -7,11 +7,20 @@ from app.video.video_reader import RawVideoSource
 from app.scheduler.frame_scheduler import FrameScheduler
 from app.ml.dummy_ml import DummyML
 from app.services.video_stream_manager import video_stream_manager
+from app.config_loader import config
 
 import threading
 import asyncio
 import os
 import time
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(name)s] %(levelname)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Jal-Drishti Backend", version="1.0.0")
 
@@ -43,25 +52,36 @@ async def raw_feed_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         video_stream_manager.disconnect(websocket)
     except Exception as e:
-        print(f"[WS] Error in raw_feed: {e}")
+        logger.error(f"[WS] Error in raw_feed: {e}")
         video_stream_manager.disconnect(websocket)
 
 @app.on_event("startup")
 async def startup_event():
+    # Load configuration
+    config.print_summary()
+    if not config.validate():
+        logger.warning("[Startup] Configuration has validation errors")
+    
     # Capture the main event loop for the WS server to use
     loop = asyncio.get_running_loop()
     ws_server.set_event_loop(loop)
-    import os
-    # Initialize Core Pipeline
-    from app.services.ml_service import ml_service
     
-    video_path = "backend/dummy.mp4"
+    # Initialize ML service (ML engine handles device selection internally)
+    from app.services.ml_service import MLService
+
+    debug_mode = config.get("ml_service.debug_mode", True)
+    ml_service = MLService(debug_mode=debug_mode)
+    # Expose the single MLService instance via the FastAPI app state so
+    # other routers (e.g. stream) can access it without importing a global.
+    app.state.ml_service = ml_service
+    
+    video_path = config.get("video.file_path", "backend/dummy.mp4")
     if not os.path.exists(video_path):
         # Check relative to root as well
         if os.path.exists("dummy.mp4"):
             video_path = "dummy.mp4"
         else:
-            print(f"[Startup] Warning: {video_path} not found.")
+            logger.warning(f"[Startup] Warning: {video_path} not found.")
             return
     
     reader = RawVideoSource(video_path)
@@ -98,19 +118,20 @@ async def startup_event():
             if "closed" in str(e) or "is not running" in str(e):
                 pass
             else:
-                print(f"[Startup] Error scheduling raw frame broadcast: {e}")
+                logger.error(f"[Startup] Error scheduling raw frame broadcast: {e}")
         except Exception as e:
             # Silently ignore exceptions during shutdown
             if not video_stream_manager.is_shutting_down:
-                print(f"[Startup] Error scheduling raw frame broadcast: {e}")
+                logger.error(f"[Startup] Error scheduling raw frame broadcast: {e}")
 
-    scheduler = FrameScheduler(reader, target_fps=5, ml_module=ml_service, result_callback=on_result, raw_callback=raw_frame_callback, shutdown_event=_shutdown_event)
+    target_fps = config.get("performance.target_fps", 5)
+    scheduler = FrameScheduler(reader, target_fps=target_fps, ml_module=ml_service, result_callback=on_result, raw_callback=raw_frame_callback, shutdown_event=_shutdown_event)
     
     # Run in background thread and store reference for shutdown
     global _scheduler_thread
     _scheduler_thread = threading.Thread(target=scheduler.run, daemon=False)  # daemon=False ensures thread joins on shutdown
     _scheduler_thread.start()
-    print("[Startup] Scheduler thread started with real ML Engine.")
+    logger.info("[Startup] Scheduler thread started (ML engine will initialize lazily).")
 
 
 @app.on_event("shutdown")
@@ -125,16 +146,16 @@ async def shutdown_event():
     
     # Signal the scheduler to stop immediately
     _shutdown_event.set()
-    print("[Shutdown] Signaled scheduler thread to stop.")
+    logger.info("[Shutdown] Signaled scheduler thread to stop.")
     
     if _scheduler_thread and _scheduler_thread.is_alive():
-        print("[Shutdown] Waiting for scheduler thread to finish...")
+        logger.info("[Shutdown] Waiting for scheduler thread to finish...")
         # Give the thread a chance to finish (e.g., end of video loop)
         _scheduler_thread.join(timeout=5.0)
         if _scheduler_thread.is_alive():
-            print("[Shutdown] Scheduler thread did not stop gracefully (timeout). Continuing shutdown.")
+            logger.warning("[Shutdown] Scheduler thread did not stop gracefully (timeout). Continuing shutdown.")
         else:
-            print("[Shutdown] Scheduler thread stopped cleanly.")
+            logger.info("[Shutdown] Scheduler thread stopped cleanly.")
 
 
 
