@@ -93,6 +93,27 @@ async def startup_event():
     # Expose the single MLService instance via the FastAPI app state so
     # other routers (e.g. stream) can access it without importing a global.
     app.state.ml_service = ml_service
+    # Warmup: initialize engine in background and wait up to 7 seconds
+    # so the first real frames sent to ML don't incur long init delay.
+    def _warmup_engine():
+        try:
+            ml_service._ensure_engine()
+        except Exception:
+            # _ensure_engine handles its own logging; we silence here
+            pass
+
+    warmup_thread = threading.Thread(target=_warmup_engine, daemon=True)
+    warmup_thread.start()
+    warmup_start = time.time()
+    warmup_timeout = 7.0  # seconds
+    logger.info(f"[Startup] Warming ML engine (waiting up to {warmup_timeout}s)...")
+    while time.time() - warmup_start < warmup_timeout:
+        if getattr(ml_service, 'engine', None) is not None:
+            logger.info("[Startup] ML engine initialized during warmup")
+            break
+        time.sleep(0.1)
+    else:
+        logger.info("[Startup] ML warmup timed out after 7s; continuing startup (engine will finish lazy init)")
     # SOURCE SELECTION LOGIC
     # =====================================================
     # INPUT_SOURCE env var controls which video source to use:
