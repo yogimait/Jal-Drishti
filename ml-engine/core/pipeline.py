@@ -165,7 +165,12 @@ class JalDrishtiEngine:
                 "detections": detections
             }
             
-            return response, enhanced_cv
+            # Branching Pipeline:
+            # 1. AI (YOLO) used 'enhanced_cv' (Scientific Red) for max accuracy.
+            # 2. Human (UI) gets 'display_frame' (Cinematic Blue) for aesthetics.
+            display_frame = self.apply_cinematic_filter(enhanced_cv)
+            
+            return response, display_frame
 
         except Exception as e:
             print(f"[Core] Pipeline Error: {e}")
@@ -178,3 +183,33 @@ class JalDrishtiEngine:
             "max_confidence": 0.0,
             "detections": []
         }
+
+    def apply_cinematic_filter(self, frame):
+        """
+        Converts 'Scientific Red' GAN output to 'Cinematic Blue' for UI.
+        Optimized for 15+ FPS on CPU.
+        """
+        # 1. Split Channels (BGR format in OpenCV)
+        b, g, r = cv2.split(frame)
+
+        # 2. Color Grading (Temperature Shift)
+        # Reduce Red (Remove the "Muddy/Sepia" look)
+        r = cv2.multiply(r, 0.75) 
+        # Boost Blue (Add the "Deep Ocean" look)
+        b = cv2.multiply(b, 1.2)
+        # Green usually stays neutral or slightly reduced
+        g = cv2.multiply(g, 0.95)
+
+        # 3. Merge back
+        # We use cv2.merge which is fast, and ensure types are safe
+        cold_frame = cv2.merge([b, g, r])
+        
+        # 4. Clip values to 0-255 range to prevent noise artifacts
+        cold_frame = np.clip(cold_frame, 0, 255).astype(np.uint8)
+
+        # 5. Contrast Boost (De-hazing)
+        # Underwater images are flat; we stretch the histogram slightly
+        # alpha=1.2 (Contrast), beta=-15 (Brightness reduction to make it 'deep')
+        cinematic_frame = cv2.convertScaleAbs(cold_frame, alpha=1.2, beta=-15)
+
+        return cinematic_frame
